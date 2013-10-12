@@ -26,6 +26,26 @@ type TaskResult struct {
 
 var boxkitePath string
 
+func (t Task) doTask() <-chan TaskResult {
+	c := make(chan TaskResult)
+	go func() {
+		if t.Name == "core.Exec" {
+
+			c <- TaskResult{true, "Execd something!"}
+		} else {
+			tc := doNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name), t.Parameters)
+			result := <-tc
+			if result.Success {
+				fmt.Println("SUCCESS:", result.Message)
+			} else {
+				fmt.Println("FAILURE:", result.Message)
+			}
+			c <- result
+		}
+	}()
+	return c
+}
+
 // Function takes
 //  file path, params map
 // returns a result chan (sends done to result chan)
@@ -54,21 +74,19 @@ func doNode(path string, params map[string]string) <-chan TaskResult {
 		// If there are tests, run the tests
 		for _, test := range boxkiteNode.Tests {
 			fmt.Println("Test:", test.Name)
+			tc := test.doTask()
+			result := <-tc
+			fmt.Println("--", result.Message)
 		}
 
 		// If the tests fail (or there are no tests), Run the steps
 		for _, step := range boxkiteNode.Steps {
 			fmt.Println("Step:", step.Name)
-			fmt.Println("Path is:", fmt.Sprintf("%s/%s.yaml", boxkitePath, step.Name))
 
-			sc := doNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, step.Name), step.Parameters)
+			sc := step.doTask()
 			result := <-sc
+			fmt.Println("--", result.Message)
 
-			if result.Success {
-				fmt.Println("SUCCESS:", result.Message)
-			} else {
-				fmt.Println("FAILURE:", result.Message)
-			}
 		}
 
 		c <- TaskResult{true, "Hooray!"}
