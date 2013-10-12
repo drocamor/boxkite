@@ -8,15 +8,15 @@ import (
 	"os"
 )
 
-type BoxkiteTask struct {
+type Task struct {
 	Name       string
 	Parameters map[string]string
 }
 
-type BoxkiteDefinition struct {
+type Node struct {
 	Name  string
-	Tests []BoxkiteTask
-	Steps []BoxkiteTask
+	Tests []Task
+	Steps []Task
 }
 
 type TaskResult struct {
@@ -29,7 +29,7 @@ var boxkitePath string
 // Function takes
 //  file path, params map
 // returns a result chan (sends done to result chan)
-func doTask(path string, params map[string]string) <-chan TaskResult {
+func doNode(path string, params map[string]string) <-chan TaskResult {
 	// Make a chan
 	c := make(chan TaskResult)
 
@@ -41,7 +41,7 @@ func doTask(path string, params map[string]string) <-chan TaskResult {
 			os.Exit(1)
 		}
 
-		var boxkiteNode BoxkiteDefinition
+		var boxkiteNode Node
 
 		err := goyaml.Unmarshal(file, &boxkiteNode)
 		if err != nil {
@@ -61,7 +61,7 @@ func doTask(path string, params map[string]string) <-chan TaskResult {
 			fmt.Println("Step:", step.Name)
 			fmt.Println("Path is:", fmt.Sprintf("%s/%s.yaml", boxkitePath, step.Name))
 
-			sc := doTask(fmt.Sprintf("%s/%s.yaml", boxkitePath, step.Name), step.Parameters)
+			sc := doNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, step.Name), step.Parameters)
 			result := <-sc
 
 			if result.Success {
@@ -90,7 +90,7 @@ func main() {
 	fmt.Println("Path is:", boxkitePath)
 	fmt.Println("Root is:", flag.Arg(0))
 
-	c := doTask(flag.Arg(0), make(map[string]string))
+	c := doNode(flag.Arg(0), make(map[string]string))
 
 	result := <-c
 
