@@ -7,12 +7,14 @@ import (
 	"io/ioutil"
 	"launchpad.net/goyaml"
 	"os"
+	"os/exec"
 	"text/template"
 )
 
 type Task struct {
 	Name       string
 	Parameters map[string]string
+	Args       []string
 }
 
 type Node struct {
@@ -66,20 +68,27 @@ func (t Task) doTask(params map[string]string) <-chan TaskResult {
 		fmt.Println("In Task:", t.Name)
 		fmt.Println("Params are:", params)
 
+		for i, arg := range t.Args {
+			t.Args[i] = templatize(arg, params)
+		}
+
+		for k, v := range t.Parameters {
+			t.Parameters[k] = templatize(v, params)
+		}
+
 		if t.Name == "core.Exec" {
-			command := templatize(t.Parameters["command"], params)
 
-			result := fmt.Sprintf("core.Exec: %s", command)
+			cmd := exec.Command(t.Args[0], t.Args[1:]...)
+			cmdOut, err := cmd.Output()
 
-			c <- TaskResult{true, result}
+			if err != nil {
+				c <- TaskResult{false, string(cmdOut)}
+			} else {
+				c <- TaskResult{true, string(cmdOut)}
+			}
+
 		} else {
 			n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
-
-			for k, v := range t.Parameters {
-
-				t.Parameters[k] = templatize(v, params)
-
-			}
 
 			tc := n.doNode(t.Parameters)
 
