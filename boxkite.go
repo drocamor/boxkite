@@ -68,7 +68,7 @@ func (t Task) doTask(params map[string]string) <-chan TaskResult {
 			c <- TaskResult{true, result}
 		} else {
 			n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
-			tc := n.doNode(params)
+			tc := n.doNode(t.Parameters)
 			result := <-tc
 			if result.Success {
 				fmt.Println("SUCCESS:", result.Message)
@@ -82,27 +82,24 @@ func (t Task) doTask(params map[string]string) <-chan TaskResult {
 }
 
 func (n Node) doNode(params map[string]string) <-chan TaskResult {
-	// Make a chan
+
 	c := make(chan TaskResult)
 
-	// in a goroutine
 	go func() {
 
 		fmt.Println("Node name:", n.Name)
 
-		// If there are tests, run the tests
 		for _, test := range n.Tests {
 			fmt.Println("Test:", test.Name)
-			tc := test.doTask(test.Parameters)
+			tc := test.doTask(params)
 			result := <-tc
 			fmt.Println("--", result.Message)
 		}
 
-		// If the tests fail (or there are no tests), Run the steps
 		for _, step := range n.Steps {
 			fmt.Println("Step:", step.Name)
 
-			sc := step.doTask(step.Parameters)
+			sc := step.doTask(params)
 			result := <-sc
 			fmt.Println("--", result.Message)
 
