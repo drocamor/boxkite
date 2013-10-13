@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"launchpad.net/goyaml"
 	"os"
+	"text/template"
 )
 
 type Task struct {
@@ -26,14 +28,47 @@ type TaskResult struct {
 
 var boxkitePath string
 
-func (t Task) doTask() <-chan TaskResult {
+func loadNode(path string) Node {
+	file, e := ioutil.ReadFile(path)
+	if e != nil {
+		fmt.Printf("File error: %v\n", e)
+		os.Exit(1)
+	}
+
+	var n Node
+
+	err := goyaml.Unmarshal(file, &n)
+	if err != nil {
+		fmt.Printf("YAML error: %v\n", err)
+		os.Exit(1)
+	}
+	return n
+}
+
+func (t Task) doTask(params map[string]string) <-chan TaskResult {
 	c := make(chan TaskResult)
 	go func() {
+		fmt.Println("Params:", params)
 		if t.Name == "core.Exec" {
 
-			c <- TaskResult{true, "Execd something!"}
+			var command bytes.Buffer
+
+			template, err := template.New("command").Parse(t.Parameters["command"])
+			if err != nil {
+				panic(err)
+			}
+
+			err = template.Execute(&command, params)
+			if err != nil {
+				panic(err)
+			}
+
+			result := fmt.Sprintf("core.Exec: %s", command.String())
+
+			c <- TaskResult{true, result}
 		} else {
-			tc := doNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name), t.Parameters)
+			n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
+			tc := n.doNode(params)
 			result := <-tc
 			if result.Success {
 				fmt.Println("SUCCESS:", result.Message)
@@ -46,44 +81,28 @@ func (t Task) doTask() <-chan TaskResult {
 	return c
 }
 
-// Function takes
-//  file path, params map
-// returns a result chan (sends done to result chan)
-func doNode(path string, params map[string]string) <-chan TaskResult {
+func (n Node) doNode(params map[string]string) <-chan TaskResult {
 	// Make a chan
 	c := make(chan TaskResult)
 
 	// in a goroutine
 	go func() {
-		file, e := ioutil.ReadFile(path)
-		if e != nil {
-			fmt.Printf("File error: %v\n", e)
-			os.Exit(1)
-		}
 
-		var boxkiteNode Node
-
-		err := goyaml.Unmarshal(file, &boxkiteNode)
-		if err != nil {
-			fmt.Printf("YAML error: %v\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Println("Node name:", boxkiteNode.Name)
+		fmt.Println("Node name:", n.Name)
 
 		// If there are tests, run the tests
-		for _, test := range boxkiteNode.Tests {
+		for _, test := range n.Tests {
 			fmt.Println("Test:", test.Name)
-			tc := test.doTask()
+			tc := test.doTask(test.Parameters)
 			result := <-tc
 			fmt.Println("--", result.Message)
 		}
 
 		// If the tests fail (or there are no tests), Run the steps
-		for _, step := range boxkiteNode.Steps {
+		for _, step := range n.Steps {
 			fmt.Println("Step:", step.Name)
 
-			sc := step.doTask()
+			sc := step.doTask(step.Parameters)
 			result := <-sc
 			fmt.Println("--", result.Message)
 
@@ -107,8 +126,8 @@ func main() {
 
 	fmt.Println("Path is:", boxkitePath)
 	fmt.Println("Root is:", flag.Arg(0))
-
-	c := doNode(flag.Arg(0), make(map[string]string))
+	n := loadNode(flag.Arg(0))
+	c := n.doNode(make(map[string]string))
 
 	result := <-c
 
