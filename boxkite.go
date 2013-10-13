@@ -45,30 +45,44 @@ func loadNode(path string) Node {
 	return n
 }
 
+func templatize(s string, p map[string]string) string {
+	var result bytes.Buffer
+
+	template, err := template.New("result").Parse(s)
+	if err != nil {
+		panic(err)
+	}
+
+	err = template.Execute(&result, p)
+	if err != nil {
+		panic(err)
+	}
+	return result.String()
+}
+
 func (t Task) doTask(params map[string]string) <-chan TaskResult {
 	c := make(chan TaskResult)
 	go func() {
-		fmt.Println("Params:", params)
+		fmt.Println("In Task:", t.Name)
+		fmt.Println("Params are:", params)
+
 		if t.Name == "core.Exec" {
+			command := templatize(t.Parameters["command"], params)
 
-			var command bytes.Buffer
-
-			template, err := template.New("command").Parse(t.Parameters["command"])
-			if err != nil {
-				panic(err)
-			}
-
-			err = template.Execute(&command, params)
-			if err != nil {
-				panic(err)
-			}
-
-			result := fmt.Sprintf("core.Exec: %s", command.String())
+			result := fmt.Sprintf("core.Exec: %s", command)
 
 			c <- TaskResult{true, result}
 		} else {
 			n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
+
+			for k, v := range t.Parameters {
+
+				t.Parameters[k] = templatize(v, params)
+
+			}
+
 			tc := n.doNode(t.Parameters)
+
 			result := <-tc
 			if result.Success {
 				fmt.Println("SUCCESS:", result.Message)
@@ -87,17 +101,17 @@ func (n Node) doNode(params map[string]string) <-chan TaskResult {
 
 	go func() {
 
-		fmt.Println("Node name:", n.Name)
-
+		fmt.Println("In Node:", n.Name)
+		fmt.Println("Params are:", params)
 		for _, test := range n.Tests {
-			fmt.Println("Test:", test.Name)
+			fmt.Println(n.Name, "- Test:", test.Name)
 			tc := test.doTask(params)
 			result := <-tc
 			fmt.Println("--", result.Message)
 		}
 
 		for _, step := range n.Steps {
-			fmt.Println("Step:", step.Name)
+			fmt.Println(n.Name, "- Step:", step.Name)
 
 			sc := step.doTask(params)
 			result := <-sc
