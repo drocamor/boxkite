@@ -112,23 +112,54 @@ func (n Node) doNode(params map[string]string) <-chan TaskResult {
 
 		fmt.Println("In Node:", n.Name)
 		fmt.Println("Params are:", params)
-		for _, test := range n.Tests {
-			fmt.Println(n.Name, "- Test:", test.Name)
-			tc := test.doTask(params)
-			result := <-tc
-			fmt.Println("--", result.Message)
+
+		var testsPassed bool
+
+		if len(n.Tests) > 0 {
+			testResults := make([]bool, len(n.Tests))
+			testsPassed = true
+
+			for i, test := range n.Tests {
+				fmt.Println(n.Name, "- Test:", test.Name)
+				tc := test.doTask(params)
+				result := <-tc
+				testResults[i] = result.Success
+			}
+
+			for _, testResult := range testResults {
+				if testResult == false {
+					testsPassed = false
+					break
+				}
+			}
+			c <- TaskResult{true, "Tests passed, no action taken!"}
+		} else {
+			testsPassed = false
 		}
 
-		for _, step := range n.Steps {
-			fmt.Println(n.Name, "- Step:", step.Name)
+		if testsPassed == false {
 
-			sc := step.doTask(params)
-			result := <-sc
-			fmt.Println("--", result.Message)
+			stepsPassed := true
 
+			for _, step := range n.Steps {
+				fmt.Println(n.Name, "- Step:", step.Name)
+
+				sc := step.doTask(params)
+				result := <-sc
+				fmt.Println("--", result.Message)
+
+				if result.Success == false {
+					c <- TaskResult{false, fmt.Sprintf("\"%s\" failed. Step \"%s\" - \"%s\".", n.Name, step.Name, result.Message)}
+					stepsPassed = false
+					break
+				}
+
+			}
+			if stepsPassed == true {
+				c <- TaskResult{true, fmt.Sprintf("\"%s\" succeeded.", n.Name)}
+			}
 		}
 
-		c <- TaskResult{true, "Hooray!"}
 	}()
 	return c
 }
