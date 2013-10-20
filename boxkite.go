@@ -30,12 +30,11 @@ const (
 	TaskSuccess MessageType = iota
 	TaskFailure
 	EnteringNode
+	TestsPassed
 )
 
 type LogMessage struct {
-	Success bool
 	Message string
-	Summary string
 	Type    MessageType
 }
 
@@ -74,7 +73,8 @@ func templatize(s string, p map[string]string) string {
 }
 
 func (t Task) doTask(params map[string]string, logChan chan LogMessage) (success bool, message string) {
-	var result LogMessage
+
+	var summary string
 
 	for i, arg := range t.Args {
 		t.Args[i] = templatize(arg, params)
@@ -85,27 +85,33 @@ func (t Task) doTask(params map[string]string, logChan chan LogMessage) (success
 	}
 
 	if t.Name == "core.Exec" {
-		result.Summary = fmt.Sprintf("%s %s", t.Name, t.Args)
+		summary = fmt.Sprintf("%s %s", t.Name, t.Args)
 		cmd := exec.Command(t.Args[0], t.Args[1:]...)
 		cmdOut, err := cmd.Output()
 
-		result.Message = string(cmdOut)
+		message = string(cmdOut)
 
 		if err != nil {
-			result.Success = false
+			success = false
 		} else {
-			result.Success = true
+			success = true
 		}
 
 	} else {
-		result.Summary = fmt.Sprintf("%s[%s]", t.Name, params)
+		summary = fmt.Sprintf("%s[%s]", t.Name, params)
 		n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
 
-		result.Success, result.Message = n.doNode(t.Parameters, logChan)
+		success, message = n.doNode(t.Parameters, logChan)
 
 	}
-	logChan <- result
-	return result.Success, result.Message
+
+	if success == true {
+		logChan <- LogMessage{Message: summary, Type: TaskSuccess}
+	} else {
+		logChan <- LogMessage{Message: summary, Type: TaskFailure}
+	}
+
+	return success, message
 }
 
 func (n Node) runTests(params map[string]string, logChan chan LogMessage) bool {
@@ -147,30 +153,31 @@ func (n Node) runSteps(params map[string]string, logChan chan LogMessage) bool {
 
 func (n Node) doNode(params map[string]string, logChan chan LogMessage) (success bool, message string) {
 
-	var result LogMessage
-	result.Summary = fmt.Sprintf("%s %s", n.Name, params)
+	logChan <- LogMessage{Message: n.Name, Type: EnteringNode}
+
+	message = fmt.Sprintf("%s %s", n.Name, params)
 
 	testsPassed := n.runTests(params, logChan)
 
 	if testsPassed == true {
-		result.Success = true
-		result.Message = fmt.Sprintf("Tests passed for %s", n.Name)
-		logChan <- result
-		return result.Success, result.Message
+		success = true
+		message = fmt.Sprintf("Tests passed for %s", n.Name)
+
+		logChan <- LogMessage{Message: message, Type: TestsPassed}
+		return true, message
 	}
 
 	stepsComplete := n.runSteps(params, logChan)
 
 	if stepsComplete == true {
-		result.Success = true
-		result.Message = fmt.Sprintf("Steps passed for %s", n.Name)
+		success = true
+		message = fmt.Sprintf("Steps passed for %s", n.Name)
 	} else {
-		result.Success = false
-		result.Message = fmt.Sprintf("Steps failed for %s", n.Name)
+		success = false
+		message = fmt.Sprintf("Steps failed for %s", n.Name)
 	}
-	logChan <- result
 
-	return result.Success, result.Message
+	return success, message
 
 }
 
@@ -180,13 +187,19 @@ func logger() chan LogMessage {
 
 	go func() {
 		for {
-			result := <-logChan
-			if result.Success == true {
+			m := <-logChan
+
+			switch m.Type {
+			case TaskSuccess:
 				status = "SUCCESS"
-			} else {
+			case TaskFailure:
 				status = "FAILURE"
+			case EnteringNode:
+				status = "In Node"
+			case TestsPassed:
+				status = "Tests Passed"
 			}
-			fmt.Printf("%s: (%s) %s\n", status, result.Summary, result.Message)
+			fmt.Printf("%s: %s\n", status, m.Message)
 		}
 	}()
 	return logChan
