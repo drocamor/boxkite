@@ -62,106 +62,118 @@ func templatize(s string, p map[string]string) string {
 	return result.String()
 }
 
-func (t Task) doTask(params map[string]string) <-chan TaskResult {
-	c := make(chan TaskResult)
-	go func() {
-		fmt.Println("In Task:", t.Name)
-		fmt.Println("Params are:", params)
+func (t Task) doTask(params map[string]string, logChan chan TaskResult) TaskResult {
+	var result TaskResult
 
-		for i, arg := range t.Args {
-			t.Args[i] = templatize(arg, params)
-		}
+	for i, arg := range t.Args {
+		t.Args[i] = templatize(arg, params)
+	}
 
-		for k, v := range t.Parameters {
-			t.Parameters[k] = templatize(v, params)
-		}
+	for k, v := range t.Parameters {
+		t.Parameters[k] = templatize(v, params)
+	}
 
-		if t.Name == "core.Exec" {
+	if t.Name == "core.Exec" {
 
-			cmd := exec.Command(t.Args[0], t.Args[1:]...)
-			cmdOut, err := cmd.Output()
+		cmd := exec.Command(t.Args[0], t.Args[1:]...)
+		cmdOut, err := cmd.Output()
 
-			if err != nil {
-				c <- TaskResult{false, string(cmdOut)}
-			} else {
-				c <- TaskResult{true, string(cmdOut)}
-			}
+		result.Message = string(cmdOut)
 
+		if err != nil {
+			result.Success = false
 		} else {
-			n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
-
-			tc := n.doNode(t.Parameters)
-
-			result := <-tc
-			if result.Success {
-				fmt.Println("SUCCESS:", result.Message)
-			} else {
-				fmt.Println("FAILURE:", result.Message)
-			}
-			c <- result
+			result.Success = true
 		}
-	}()
-	return c
+
+	} else {
+		n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
+
+		result = n.doNode(t.Parameters, logChan)
+
+	}
+	logChan <- result
+	return result
 }
 
-func (n Node) doNode(params map[string]string) <-chan TaskResult {
+func (n Node) runTests(params map[string]string, logChan chan TaskResult) bool {
+	var testsPassed bool
+	if len(n.Tests) > 0 {
+		testResults := make([]bool, len(n.Tests))
+		testsPassed = true
 
-	c := make(chan TaskResult)
+		for i, test := range n.Tests {
+
+			r := test.doTask(params, logChan)
+			testResults[i] = r.Success
+		}
+
+		for _, testResult := range testResults {
+			if testResult == false {
+				testsPassed = false
+				break
+			}
+		}
+
+	}
+	return testsPassed
+}
+
+func (n Node) runSteps(params map[string]string, logChan chan TaskResult) bool {
+	for _, step := range n.Steps {
+
+		rs := step.doTask(params, logChan)
+
+		if rs.Success == false {
+			return false
+
+		}
+
+	}
+	return true
+}
+
+func (n Node) doNode(params map[string]string, logChan chan TaskResult) TaskResult {
+
+	var result TaskResult
+
+	testsPassed := n.runTests(params, logChan)
+
+	if testsPassed == true {
+		result.Success = true
+		result.Message = fmt.Sprintf("Tests passed for %s", n.Name)
+		logChan <- result
+		return result
+	}
+
+	stepsComplete := n.runSteps(params, logChan)
+
+	if stepsComplete == true {
+		result.Success = true
+		result.Message = fmt.Sprintf("Steps passed for %s", n.Name)
+	} else {
+		result.Success = false
+		result.Message = fmt.Sprintf("Steps failed for %s", n.Name)
+	}
+	logChan <- result
+	return result
+
+}
+
+func logger() chan TaskResult {
+	logChan := make(chan TaskResult)
 
 	go func() {
-
-		fmt.Println("In Node:", n.Name)
-		fmt.Println("Params are:", params)
-
-		var testsPassed bool
-
-		if len(n.Tests) > 0 {
-			testResults := make([]bool, len(n.Tests))
-			testsPassed = true
-
-			for i, test := range n.Tests {
-				fmt.Println(n.Name, "- Test:", test.Name)
-				tc := test.doTask(params)
-				result := <-tc
-				testResults[i] = result.Success
-			}
-
-			for _, testResult := range testResults {
-				if testResult == false {
-					testsPassed = false
-					break
-				}
-			}
-			c <- TaskResult{true, "Tests passed, no action taken!"}
-		} else {
-			testsPassed = false
-		}
-
-		if testsPassed == false {
-
-			stepsPassed := true
-
-			for _, step := range n.Steps {
-				fmt.Println(n.Name, "- Step:", step.Name)
-
-				sc := step.doTask(params)
-				result := <-sc
-				fmt.Println("--", result.Message)
-
-				if result.Success == false {
-					c <- TaskResult{false, fmt.Sprintf("\"%s\" failed. Step \"%s\" - \"%s\".", n.Name, step.Name, result.Message)}
-					stepsPassed = false
-					break
-				}
-
-			}
-			if stepsPassed == true {
-				c <- TaskResult{true, fmt.Sprintf("\"%s\" succeeded.", n.Name)}
+		for {
+			result := <-logChan
+			if result.Success == true {
+				fmt.Printf("SUCCESS: %s\n", result.Message)
+			} else {
+				fmt.Printf("FAILURE: %s\n", result.Message)
 			}
 		}
-
 	}()
-	return c
+	return logChan
 }
 
 func main() {
@@ -175,17 +187,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Path is:", boxkitePath)
-	fmt.Println("Root is:", flag.Arg(0))
+	logChan := logger()
+
 	n := loadNode(flag.Arg(0))
-	c := n.doNode(make(map[string]string))
+	result := n.doNode(make(map[string]string), logChan)
 
-	result := <-c
-
-	if result.Success {
-		fmt.Println("SUCCESS:", result.Message)
-	} else {
-		fmt.Println("FAILURE:", result.Message)
-	}
+	logChan <- result
 
 }
