@@ -23,10 +23,20 @@ type Node struct {
 	Steps []Task
 }
 
-type TaskResult struct {
+// unused now, but soon...
+type MessageType int
+
+const (
+	TaskSuccess MessageType = iota
+	TaskFailure
+	EnteringNode
+)
+
+type LogMessage struct {
 	Success bool
 	Message string
 	Summary string
+	Type    MessageType
 }
 
 var boxkitePath string
@@ -63,8 +73,8 @@ func templatize(s string, p map[string]string) string {
 	return result.String()
 }
 
-func (t Task) doTask(params map[string]string, logChan chan TaskResult) TaskResult {
-	var result TaskResult
+func (t Task) doTask(params map[string]string, logChan chan LogMessage) LogMessage {
+	var result LogMessage
 
 	for i, arg := range t.Args {
 		t.Args[i] = templatize(arg, params)
@@ -98,8 +108,9 @@ func (t Task) doTask(params map[string]string, logChan chan TaskResult) TaskResu
 	return result
 }
 
-func (n Node) runTests(params map[string]string, logChan chan TaskResult) bool {
+func (n Node) runTests(params map[string]string, logChan chan LogMessage) bool {
 	var testsPassed bool
+
 	if len(n.Tests) > 0 {
 		testResults := make([]bool, len(n.Tests))
 		testsPassed = true
@@ -121,7 +132,7 @@ func (n Node) runTests(params map[string]string, logChan chan TaskResult) bool {
 	return testsPassed
 }
 
-func (n Node) runSteps(params map[string]string, logChan chan TaskResult) bool {
+func (n Node) runSteps(params map[string]string, logChan chan LogMessage) bool {
 	for _, step := range n.Steps {
 
 		rs := step.doTask(params, logChan)
@@ -135,9 +146,9 @@ func (n Node) runSteps(params map[string]string, logChan chan TaskResult) bool {
 	return true
 }
 
-func (n Node) doNode(params map[string]string, logChan chan TaskResult) TaskResult {
+func (n Node) doNode(params map[string]string, logChan chan LogMessage) LogMessage {
 
-	var result TaskResult
+	var result LogMessage
 	result.Summary = fmt.Sprintf("%s %s", n.Name, params)
 
 	testsPassed := n.runTests(params, logChan)
@@ -163,8 +174,8 @@ func (n Node) doNode(params map[string]string, logChan chan TaskResult) TaskResu
 
 }
 
-func logger() chan TaskResult {
-	logChan := make(chan TaskResult)
+func logger() chan LogMessage {
+	logChan := make(chan LogMessage)
 	var status string
 
 	go func() {
