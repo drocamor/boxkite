@@ -26,6 +26,7 @@ type Node struct {
 type TaskResult struct {
 	Success bool
 	Message string
+	Summary string
 }
 
 var boxkitePath string
@@ -74,7 +75,7 @@ func (t Task) doTask(params map[string]string, logChan chan TaskResult) TaskResu
 	}
 
 	if t.Name == "core.Exec" {
-
+		result.Summary = fmt.Sprintf("%s %s", t.Name, t.Args)
 		cmd := exec.Command(t.Args[0], t.Args[1:]...)
 		cmdOut, err := cmd.Output()
 
@@ -87,6 +88,7 @@ func (t Task) doTask(params map[string]string, logChan chan TaskResult) TaskResu
 		}
 
 	} else {
+		result.Summary = fmt.Sprintf("%s[%s]", t.Name, params)
 		n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
 
 		result = n.doNode(t.Parameters, logChan)
@@ -136,6 +138,7 @@ func (n Node) runSteps(params map[string]string, logChan chan TaskResult) bool {
 func (n Node) doNode(params map[string]string, logChan chan TaskResult) TaskResult {
 
 	var result TaskResult
+	result.Summary = fmt.Sprintf("%s %s", n.Name, params)
 
 	testsPassed := n.runTests(params, logChan)
 
@@ -162,15 +165,17 @@ func (n Node) doNode(params map[string]string, logChan chan TaskResult) TaskResu
 
 func logger() chan TaskResult {
 	logChan := make(chan TaskResult)
+	var status string
 
 	go func() {
 		for {
 			result := <-logChan
 			if result.Success == true {
-				fmt.Printf("SUCCESS: %s\n", result.Message)
+				status = "SUCCESS"
 			} else {
-				fmt.Printf("FAILURE: %s\n", result.Message)
+				status = "FAILURE"
 			}
+			fmt.Printf("%s: (%s) %s\n", status, result.Summary, result.Message)
 		}
 	}()
 	return logChan
