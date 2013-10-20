@@ -101,7 +101,7 @@ func (t Task) doTask(params map[string]string, logChan chan LogMessage) (success
 		result.Summary = fmt.Sprintf("%s[%s]", t.Name, params)
 		n := loadNode(fmt.Sprintf("%s/%s.yaml", boxkitePath, t.Name))
 
-		result = n.doNode(t.Parameters, logChan)
+		result.Success, result.Message = n.doNode(t.Parameters, logChan)
 
 	}
 	logChan <- result
@@ -145,7 +145,7 @@ func (n Node) runSteps(params map[string]string, logChan chan LogMessage) bool {
 	return true
 }
 
-func (n Node) doNode(params map[string]string, logChan chan LogMessage) LogMessage {
+func (n Node) doNode(params map[string]string, logChan chan LogMessage) (success bool, message string) {
 
 	var result LogMessage
 	result.Summary = fmt.Sprintf("%s %s", n.Name, params)
@@ -156,7 +156,7 @@ func (n Node) doNode(params map[string]string, logChan chan LogMessage) LogMessa
 		result.Success = true
 		result.Message = fmt.Sprintf("Tests passed for %s", n.Name)
 		logChan <- result
-		return result
+		return result.Success, result.Message
 	}
 
 	stepsComplete := n.runSteps(params, logChan)
@@ -169,7 +169,8 @@ func (n Node) doNode(params map[string]string, logChan chan LogMessage) LogMessa
 		result.Message = fmt.Sprintf("Steps failed for %s", n.Name)
 	}
 	logChan <- result
-	return result
+
+	return result.Success, result.Message
 
 }
 
@@ -205,8 +206,6 @@ func main() {
 	logChan := logger()
 
 	n := loadNode(flag.Arg(0))
-	result := n.doNode(make(map[string]string), logChan)
-
-	logChan <- result
+	_, _ = n.doNode(make(map[string]string), logChan)
 
 }
