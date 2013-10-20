@@ -73,7 +73,7 @@ func templatize(s string, p map[string]string) string {
 	return result.String()
 }
 
-func (t Task) doTask(params map[string]string, logChan chan LogMessage) LogMessage {
+func (t Task) doTask(params map[string]string, logChan chan LogMessage) (success bool, message string) {
 	var result LogMessage
 
 	for i, arg := range t.Args {
@@ -105,7 +105,7 @@ func (t Task) doTask(params map[string]string, logChan chan LogMessage) LogMessa
 
 	}
 	logChan <- result
-	return result
+	return result.Success, result.Message
 }
 
 func (n Node) runTests(params map[string]string, logChan chan LogMessage) bool {
@@ -117,8 +117,7 @@ func (n Node) runTests(params map[string]string, logChan chan LogMessage) bool {
 
 		for i, test := range n.Tests {
 
-			r := test.doTask(params, logChan)
-			testResults[i] = r.Success
+			testResults[i], _ = test.doTask(params, logChan)
 		}
 
 		for _, testResult := range testResults {
@@ -135,9 +134,9 @@ func (n Node) runTests(params map[string]string, logChan chan LogMessage) bool {
 func (n Node) runSteps(params map[string]string, logChan chan LogMessage) bool {
 	for _, step := range n.Steps {
 
-		rs := step.doTask(params, logChan)
+		r, _ := step.doTask(params, logChan)
 
-		if rs.Success == false {
+		if r == false {
 			return false
 
 		}
